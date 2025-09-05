@@ -81,7 +81,9 @@ async function processBackup() {
         versionCommand = 'mongodump --version';
         break;
       case 'mysql':
-        dumpCommand = `mysqldump -u ${dbUser} -p${dbPassword} -h ${dbHostname} -P ${dbPort} ${dbName} > "${filepath}.dump"`;
+        //dumpCommand = `mysqldump -u ${dbUser} -p${dbPassword} -h ${dbHostname} -P ${dbPort} ${dbName} > "${filepath}.dump"`;
+        dumpCommand = `mariadb-dump -u ${dbUser} -p${dbPassword} -h ${dbHostname} -P ${dbPort} ${dbName} > "${filepath}.dump"`;
+        //mariadb-dump --ssl-mode=VERIFY_NONE -u root -pmypassword -h mysql.railway.internal -P 3306 railway > backup.sql
         versionCommand = 'mysql --version';
         break;
       default:
