@@ -23,7 +23,7 @@ COPY ./ /root
 
 # Install PostgreSQL, MySQL and MongoDB clients
 
-RUN apk add --update --no-cache postgresql-client mysql-client mongodb-tools nodejs npm mariadb-connector-c-dev
+RUN apk add --update --no-cache postgresql-client mysql-client mongodb-tools nodejs npm mariadb-connector-c-dev gnupg
 
 
 ENTRYPOINT ["node", "index.js"]

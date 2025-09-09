@@ -11,7 +11,8 @@ function loadConfig() {
     'AWS_SECRET_ACCESS_KEY',
     'AWS_S3_REGION',
     'AWS_S3_ENDPOINT',
-    'AWS_S3_BUCKET'
+    'AWS_S3_BUCKET',
+    'DATABASES'
   ];
   
   for (const key of requiredEnvars) {
@@ -31,6 +32,7 @@ function loadConfig() {
     databases: process.env.DATABASES ? process.env.DATABASES.split(",") : [],
     run_on_startup: process.env.RUN_ON_STARTUP === 'true' ? true : false,
     cron: process.env.CRON,
+    gpgpublickey: process.env.GPGPUBLICKEY,
   };
 }
 
@@ -64,24 +66,28 @@ async function processBackup() {
     const min = String(date.getMinutes()).padStart(2, '0');
     const ss = String(date.getSeconds()).padStart(2, '0');
     const timestamp = `${yyyy}-${mm}-${dd}_${hh}:${min}:${ss}`;
-    const filename = `backup-${dbType}-${timestamp}-${dbName}-${dbHostname}.tar.gz`;
-    const filepath = `/tmp/${filename}`;
+    const filename = `backup-${dbType}-${timestamp}-${dbName}-${dbHostname}`;
+    const compressedFilename =`${filename}.tar.gz`;
+    const encryptedFilename =`${filename}.tar.gz.gpg`;
+    const folder = '/tmp/';
 
+    let shouldEncrypt = !!config.gpgpublickey;
+    
     console.log(`\n[${databaseIteration}/${totalDatabases}] ${dbType}/${dbName} Backup in progress...`);
 
     let dumpCommand;
     let versionCommand = 'echo "Unknown database type"';
     switch (dbType) {
       case 'postgresql':
-        dumpCommand = `pg_dump "${databaseURI}" -F c > "${filepath}.dump"`;
+        dumpCommand = `pg_dump "${databaseURI}" -F c > "${folder}${filename}.dump"`;
         versionCommand = 'psql --version';
         break;
       case 'mongodb':
-        dumpCommand = `mongodump --uri="${databaseURI}" --archive="${filepath}.dump"`;
+        dumpCommand = `mongodump --uri="${databaseURI}" --archive="${folder}${filename}.dump"`;
         versionCommand = 'mongodump --version';
         break;
       case 'mysql':
-        dumpCommand = `mariadb-dump --skip-ssl -u ${dbUser} -p${dbPassword} -h ${dbHostname} -P ${dbPort} ${dbName} > "${filepath}.dump"`;
+        dumpCommand = `mariadb-dump --skip-ssl -u ${dbUser} -p${dbPassword} -h ${dbHostname} -P ${dbPort} ${dbName} > "${folder}${filename}.dump"`;
         versionCommand = 'mysql --version';
         break;
       default:
@@ -102,15 +108,26 @@ async function processBackup() {
       await exec(dumpCommand);
 
       // 2. Compress the dump file
-      await exec(`tar -czvf ${filepath} ${filepath}.dump`);
+      await exec(`tar -czvf ${folder}${compressedFilename} ${folder}${filename}.dump`);
+      
+      // 3. Optionally encrypt the compressed file
+      let filepathToUpload = `${folder}${compressedFilename}`
+      if (shouldEncrypt) {
+        console.log('Writing GPG public key to disk');
+        fs.writeFileSync('/tmp/public-key.asc', config.gpgpublickey.replace(/\\n/g, '\n'));
 
-      // 3. Read the compressed file
-      const data = fs.readFileSync(filepath);
+        console.log('Encrypting backup');
+        await exec(`gpg --encrypt --recipient-file /tmp/public-key.asc -o ${folder}${encryptedFilename} ${folder}${compressedFilename}`);
+        filepathToUpload = `${folder}${encryptedFilename}`
+      }
 
-      // 4. Upload to S3
+      // 4. Read the compressed file
+      const data = fs.readFileSync(filepathToUpload);
+
+      // 5. Upload to S3
       const params = {
         Bucket: config.aws.s3_bucket,
-        Key: filename,
+        Key: shouldEncrypt ? encryptedFilename : compressedFilename,
         Body: data
       };
 
@@ -120,7 +137,11 @@ async function processBackup() {
       console.log(`✓ Successfully uploaded db backup for database ${dbType} ${dbName} ${dbHostname}.`);
 
       // 5. Clean up temporary files
-      await exec(`rm -f ${filepath} ${filepath}.dump`);
+      await exec(`rm -f ${folder}${compressedFilename} ${folder}${filename}.dump`);      
+      if (shouldEncrypt) {
+        await exec(`rm -f ${folder}${encryptedFilename}`);
+        await exec('rm  /tmp/public-key.asc');
+      }      
     } catch (error) {
       console.error(`An error occurred while processing the database ${dbType} ${dbName}, host: ${dbHostname}): ${error}`);
     }
