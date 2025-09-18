@@ -33,6 +33,7 @@ function loadConfig() {
     run_on_startup: process.env.RUN_ON_STARTUP === 'true' ? true : false,
     cron: process.env.CRON,
     gpgpublickey: process.env.GPGPUBLICKEY,
+    folderprefix: process.env.FOLDERPREFIX
   };
 }
 
@@ -125,9 +126,12 @@ async function processBackup() {
       const data = fs.readFileSync(filepathToUpload);
 
       // 5. Upload to S3
+      const prefix = config.folderprefix ? config.folderprefix + '/' : '';
+      const uploadFilename  = shouldEncrypt ? encryptedFilename : compressedFilename;
+      
       const params = {
         Bucket: config.aws.s3_bucket,
-        Key: shouldEncrypt ? encryptedFilename : compressedFilename,
+        Key: prefix + uploadFilename ,
         Body: data
       };
 
